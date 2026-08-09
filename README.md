@@ -49,6 +49,9 @@ Music-Unlock/
 │   ├── decrypt_algorithms.py # 解密算法模块（NCM/QMC/KGM/KWM + 格式注册表）
 │   ├── requirements.txt      # Python 依赖
 │   └── .env.example          # 环境变量模板（密钥配置）
+├── Dockerfile                # Docker 镜像构建文件
+├── docker-compose.yml        # Docker Compose 编排配置
+├── .dockerignore             # Docker 构建忽略文件
 ├── .gitignore
 ├── LICENSE
 └── README.md
@@ -144,7 +147,37 @@ Music-Unlock/
 2. Framework Preset 选择 "Other"
 3. 点击 "Deploy"
 
-### 后端（FastAPI）
+### 后端 + 前端一体化（Docker，推荐）
+
+Docker 部署会同时启动前端静态站和后端解密服务，一个容器搞定全部。
+
+```bash
+# 1. 配置密钥
+cp backend/.env.example backend/.env
+# 编辑 backend/.env 填入实际密钥值
+
+# 2. 构建并启动
+docker compose up -d
+
+# 3. 查看日志
+docker compose logs -f
+
+# 4. 停止
+docker compose down
+```
+
+启动后访问 `http://localhost:8000/` 即可使用完整应用（前端 + 后端解密）。
+
+容器内置健康检查，自动监控 `/api/health` 端点。
+
+如需自定义端口，修改 `docker-compose.yml` 中的端口映射：
+
+```yaml
+ports:
+  - "3000:8000"  # 将本地 3000 端口映射到容器
+```
+
+### 后端（手动部署）
 
 ```bash
 cd backend
@@ -204,7 +237,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 - **前端**：Vue.js 2 + PWA + Element UI（um-web legacy v1.10.7）
 - **后端**：Python FastAPI + libtakiyasha 2.1.1.post1
-- **部署**：GitHub Pages / Netlify / Vercel
+- **部署**：Docker / GitHub Pages / Netlify / Vercel
 
 ## 许可协议
 
