@@ -56,7 +56,7 @@
         if (target) {
             patchFileSelector(target);
             console.log('[api-decrypt] FileSelector 已接管，解密请求将发送至 ' + API_URL);
-            // 查询后端格式注册表，输出新旧解密器映射
+            // 查询后端格式注册表，输出新旧解密器映射并渲染不支持格式提示
             fetch('/api/formats').then(function (r) { return r.json(); }).then(function (data) {
                 console.group('[api-decrypt] 格式注册表 (新后端 ↔ 旧前端)');
                 data.supported.forEach(function (f) {
@@ -70,6 +70,9 @@
                     });
                 }
                 console.groupEnd();
+
+                // 在页面底部渲染不支持格式提示
+                renderUnsupportedFormats(data.unsupported_legacy || []);
             }).catch(function () {});
         } else {
             // 可能组件还未渲染，稍后重试
@@ -86,6 +89,48 @@
             if (found) return found;
         }
         return null;
+    }
+
+    // 在页面底部渲染不支持的解密格式提示
+    function renderUnsupportedFormats(formats) {
+        if (!formats || !formats.length) return;
+
+        // 避免重复渲染
+        if (document.getElementById('api-decrypt-unsupported')) return;
+
+        var container = document.createElement('div');
+        container.id = 'api-decrypt-unsupported';
+        container.style.cssText = [
+            'position:fixed',
+            'bottom:0',
+            'left:0',
+            'right:0',
+            'z-index:9999',
+            'padding:8px 16px',
+            'background:#fff3cd',
+            'border-top:1px solid #ffe082',
+            'color:#856404',
+            'font-size:12px',
+            'line-height:1.6',
+            'text-align:center',
+            'box-shadow:0 -2px 8px rgba(0,0,0,.08)'
+        ].join(';');
+
+        var exts = formats.map(function (f) {
+            return '.' + f.extension;
+        }).join(' ');
+
+        var platforms = formats.map(function (f) {
+            return f.platform;
+        }).join('、');
+
+        container.innerHTML =
+            '<strong>新解密后端暂不支持的格式：</strong>' +
+            exts + '（' + platforms + '）' +
+            '<span style="margin-left:8px;color:#a07a00">' +
+            'libtakiyasha 未实现对应解密算法</span>';
+
+        document.body.appendChild(container);
     }
 
     // 覆写 FileSelector.addFile
