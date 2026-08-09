@@ -39,6 +39,7 @@ MAX_FILE_SIZE = 50 * 1024 * 1024  # 52,428,800 字节
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "https://musicunlock.guxinze.us.ci",
         "https://changliu7stream.github.io",
         "http://localhost:8000",
         "http://127.0.0.1:8000",

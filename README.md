@@ -4,6 +4,7 @@
 
 ## 在线演示
 
+- 自定义域名：[https://musicunlock.guxinze.us.ci/](https://musicunlock.guxinze.us.ci/)
 - GitHub Pages：[https://changliu7stream.github.io/Music-Unlock/](https://changliu7stream.github.io/Music-Unlock/)
 
 ## 简介
