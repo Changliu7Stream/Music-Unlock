@@ -1,6 +1,13 @@
 # Music-Unlock
 
-音乐解锁 Web 应用（um-web legacy build v1.10.7），解密逻辑已迁移至 FastAPI 后端。
+音乐解锁后端解密服务（FastAPI + libtakiyasha 2.x），um-web legacy v1.10.7。
+
+## 仓库结构
+
+| 仓库 | 说明 |
+|------|------|
+| **[Music-Unlock](https://github.com/Changliu7Stream/Music-Unlock)**（本仓库） | 后端解密服务：`main.py`（FastAPI 服务层）+ `decrypt_algorithms.py`（新解密算法） |
+| **[Music-Unlock-Web](https://github.com/Changliu7Stream/Music-Unlock-Web)** | 旧前端项目：um-web legacy v1.10.7 编译产物 + `api-decrypt.js` 前端补丁 |
 
 ## 在线演示
 
@@ -12,12 +19,38 @@
 
 本项目基于 um-web legacy v1.10.6 Vue2 项目，升级至 v1.10.7，保留前端 UI 与 PWA 配置不动，做最小升级：
 
-- 前端 `public/api-decrypt.js` 拦截 FileSelector，将文件上传至后端 `/api/decrypt`
-- 后端 `main.py` 使用 Python FastAPI + libtakiyasha 2.x，按后缀路由解密
+- 旧前端项目已迁移至独立仓库 [Music-Unlock-Web](https://github.com/Changliu7Stream/Music-Unlock-Web)
+- 旧前端 `api-decrypt.js` 拦截 FileSelector，将文件上传至后端 `/api/decrypt`
+- 后端 `main.py` 为 FastAPI 服务层，`decrypt_algorithms.py` 为新解密算法模块
 - `FORMAT_REGISTRY` 格式注册表建立新后端解密器与旧前端 `src/decrypt` 解密器的完整映射
 - 密钥全部通过环境变量注入（`.env.example`），不硬编码私钥
 - 解密成功返回原始 FLAC/OGG/MP3 blob，失败返回 JSON `{ok:false}`
 - 前端拿到 blob 走原下载逻辑，UI 组件不动
+
+## 项目结构
+
+```
+Music-Unlock/
+├── main.py                  # FastAPI 服务层（HTTP 端点 + 静态文件托管）
+├── decrypt_algorithms.py    # 新解密算法（密钥加载 + 解密器 + 格式注册表）
+├── requirements.txt         # Python 依赖
+├── .env.example             # 环境变量模板（密钥配置）
+├── .gitignore
+├── LICENSE
+└── README.md
+```
+
+## 新旧解密器关联
+
+`decrypt_algorithms.py` 中的 `FORMAT_REGISTRY` 建立了新后端解密器与旧前端 `src/decrypt/` 的完整映射：
+
+| 新后端解密器 | 旧前端模块 | libtakiyasha | 平台 |
+|-------------|-----------|--------------|------|
+| `_decrypt_ncm()` | `src/decrypt/ncm.ts` → NCMDecrypt | `lt.NCM.open()` | 网易云音乐 |
+| `_decrypt_qmcv2()` | `src/decrypt/qmc/v2.ts` → QMCv2Decrypt | `lt.QMCv2.open()` | QQ音乐新版 |
+| `_decrypt_qmcv1()` | `src/decrypt/qmc/v1.ts` → QMCv1Decrypt | `lt.QMCv1.open()` | QQ音乐旧版 |
+| `_decrypt_kgm()` | `src/decrypt/kgm.ts` → KGMCrypto | `lt.KGMorVPR.open()` | 酷狗音乐 |
+| `_decrypt_kwm()` | `src/decrypt/kwm.ts` → KWMDecrypt | `lt.KWM.open()` | 酷我音乐 |
 
 ## 支持格式
 
@@ -42,7 +75,7 @@
 
 ## 技术栈
 
-- **前端**：Vue.js + PWA (Service Worker) + Element UI（保留原样）
+- **前端**：[Music-Unlock-Web](https://github.com/Changliu7Stream/Music-Unlock-Web) — Vue.js + PWA + Element UI（保留原样）
 - **后端**：Python FastAPI + libtakiyasha 2.1.1.post1
 
 ## 部署
@@ -67,7 +100,8 @@ python main.py
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-后端启动后，前端静态文件由 FastAPI 自动托管在根路径 `/`。
+后端启动后，若 `public/` 目录存在则由 FastAPI 自动托管前端静态文件。
+前端项目也可从 [Music-Unlock-Web](https://github.com/Changliu7Stream/Music-Unlock-Web) 仓库单独部署。
 
 ### 无服务器（Serverless）部署
 
@@ -75,7 +109,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 #### Vercel
 
-1. Fork 本仓库到你的 GitHub 账号
+1. Fork [Music-Unlock-Web](https://github.com/Changliu7Stream/Music-Unlock-Web) 仓库到你的 GitHub 账号
 2. 登录 [Vercel](https://vercel.com/)，点击 "New Project"
 3. 导入你 Fork 的仓库
 4. Framework Preset 选择 "Other"（纯静态项目）
@@ -83,7 +117,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 #### Netlify
 
-1. Fork 本仓库到你的 GitHub 账号
+1. Fork [Music-Unlock-Web](https://github.com/Changliu7Stream/Music-Unlock-Web) 仓库到你的 GitHub 账号
 2. 登录 [Netlify](https://www.netlify.com/)，点击 "Add new site" → "Import an existing project"
 3. 连接 GitHub 并选择你 Fork 的仓库
 4. Build command 留空，Publish directory 设置为项目根目录（即仓库根目录）
