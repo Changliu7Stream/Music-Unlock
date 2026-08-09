@@ -3,262 +3,47 @@ MusicUnlock 后端解密服务
 FastAPI + libtakiyasha 2.x
 
 POST /api/decrypt: 接收上传的加密音频文件，按后缀路由解密，返回原始格式 blob。
-所有解密密钥通过环境变量注入，代码中不硬编码任何私钥。
+GET  /api/formats: 返回格式注册表（新后端 ↔ 旧前端解密器映射）。
+
+解密算法已提取至 decrypt_algorithms.py，本文件仅负责 HTTP 服务层。
+关联旧前端项目: https://github.com/Changliu7Stream/Music-Unlock-Web
 """
 
-import io
-import os
 import urllib.parse
 import warnings
 from pathlib import Path
-from typing import Optional
 
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-import libtakiyasha as lt
-
 # 抑制 libtakiyasha 的 DeprecationWarning
 warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+# 导入解密算法模块（新算法，关联旧前端 src/decrypt/）
+from decrypt_algorithms import (
+    route_and_decrypt,
+    FORMAT_REGISTRY,
+    UNSUPPORTED_LEGACY_FORMATS,
+    MIME_MAP,
+)
 
 app = FastAPI(title="MusicUnlock API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://musicunlock.guxinze.us.ci",
+        "https://quiet-pie-063f08.netlify.app",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Title", "X-Artist", "X-Album", "X-Ext", "X-Mime"],
 )
-
-
-# ---------------------------------------------------------------------------
-# 密钥加载：全部从环境变量读取，不硬编码
-# ---------------------------------------------------------------------------
-
-def _env_hex(name: str) -> Optional[bytes]:
-    """从环境变量读取 hex 编码的密钥，返回 bytes；未设置则返回 None"""
-    val = os.environ.get(name)
-    if not val:
-        return None
-    return bytes.fromhex(val.strip().replace(" ", "").replace("\n", ""))
-
-
-def _env_str(name: str) -> Optional[bytes]:
-    """从环境变量读取字符串密钥，返回 bytes；未设置则返回 None"""
-    val = os.environ.get(name)
-    if not val:
-        return None
-    return val.encode("utf-8")
-
-
-def _env_int(name: str, default: int) -> int:
-    """从环境变量读取整数"""
-    val = os.environ.get(name)
-    if not val:
-        return default
-    return int(val)
-
-
-# 启动时加载密钥
-NCM_CORE_KEY = _env_str("NCM_CORE_KEY")
-NCM_TAG_KEY = _env_str("NCM_TAG_KEY")  # 可选，库有默认值
-
-QMCV2_CORE_KEY = None
-if os.environ.get("QMCV2_CORE_KEY"):
-    QMCV2_CORE_KEY = _env_hex("QMCV2_CORE_KEY")
-elif os.environ.get("QMCV2_CORE_KEY_SALT"):
-    # 也可以通过 salt+length 派生
-    from libtakiyasha.qmc._qmckeyciphers import make_core_key
-    QMCV2_CORE_KEY = make_core_key(
-        _env_int("QMCV2_CORE_KEY_SALT", 106),
-        _env_int("QMCV2_CORE_KEY_LENGTH", 8),
-    )
-
-QMCV1_MASK = _env_hex("QMCV1_MASK")
-
-KGM_TABLE1 = _env_hex("KGM_TABLE1")
-KGM_TABLE2 = _env_hex("KGM_TABLE2")
-KGM_TABLEV2 = _env_hex("KGM_TABLEV2")
-VPR_KEY = _env_hex("VPR_KEY")
-
-KWM_CORE_KEY = _env_str("KWM_CORE_KEY")
-
-# 启动时打印已加载的密钥状态（不输出实际值）
-_loaded = {k: ("已加载" if v else "未设置") for k, v in {
-    "NCM_CORE_KEY": NCM_CORE_KEY,
-    "NCM_TAG_KEY": NCM_TAG_KEY,
-    "QMCV2_CORE_KEY": QMCV2_CORE_KEY,
-    "QMCV1_MASK": QMCV1_MASK,
-    "KGM_TABLE1": KGM_TABLE1,
-    "KGM_TABLE2": KGM_TABLE2,
-    "KGM_TABLEV2": KGM_TABLEV2,
-    "VPR_KEY": VPR_KEY,
-    "KWM_CORE_KEY": KWM_CORE_KEY,
-}.items()}
-print(f"[MusicUnlock] 密钥加载状态: {_loaded}")
-
-
-# ---------------------------------------------------------------------------
-# MIME 类型映射
-# ---------------------------------------------------------------------------
-
-MIME_MAP = {
-    "mp3": "audio/mpeg",
-    "flac": "audio/flac",
-    "ogg": "audio/ogg",
-    "m4a": "audio/mp4",
-    "wav": "audio/wav",
-    "ape": "audio/ape",
-}
-
-
-# ---------------------------------------------------------------------------
-# 文件类型路由
-# ---------------------------------------------------------------------------
-
-def get_file_ext(filename: str) -> str:
-    return Path(filename).suffix.lower().lstrip(".")
-
-
-def route_and_decrypt(filename: str, file_data: bytes) -> tuple[bytes, str, dict]:
-    """
-    根据文件后缀路由到对应的解密器。
-    返回 (解密后音频数据, 音频格式, 元数据)。
-    """
-    ext = get_file_ext(filename)
-
-    if ext == "ncm":
-        return _decrypt_ncm(file_data, filename)
-    elif ext in ("mflac", "mflac0", "mflach", "mgg", "mgg0", "mgg1", "mggl", "mmp4"):
-        return _decrypt_qmcv2(file_data, filename)
-    elif ext.startswith("qmc") or ext in ("tkm", "bkcmp3", "bkcm4a", "bkcflac",
-                                           "bkcwav", "bkcape", "bkcogg", "bkcwma"):
-        return _decrypt_qmcv1(file_data, filename)
-    elif ext in ("kgm", "kgma", "vpr"):
-        return _decrypt_kgm(file_data, filename)
-    elif ext == "kwm":
-        return _decrypt_kwm(file_data, filename)
-    else:
-        raise ValueError(f"不支持的文件格式: .{ext}")
-
-
-def _decrypt_ncm(file_data: bytes, filename: str) -> tuple[bytes, str, dict]:
-    if not NCM_CORE_KEY:
-        raise ValueError("NCM_CORE_KEY 环境变量未设置，无法解密 NCM 文件")
-
-    fd = io.BytesIO(file_data)
-    fd.name = filename
-    kwargs = {"core_key": NCM_CORE_KEY}
-    if NCM_TAG_KEY:
-        kwargs["tag_key"] = NCM_TAG_KEY
-    ncmfile = lt.NCM.open(fd, **kwargs)
-    audio_data = b"".join(ncmfile)
-
-    audio_format = "mp3"
-    metadata: dict = {}
-    try:
-        tag = ncmfile.ncm_tag
-        if tag:
-            if tag.format:
-                audio_format = tag.format
-            if tag.musicName:
-                metadata["title"] = tag.musicName
-            if tag.artist:
-                artists = []
-                for a in tag.artist:
-                    if isinstance(a, list):
-                        artists.extend(str(x) for x in a if x)
-                    else:
-                        artists.append(str(a))
-                metadata["artist"] = " / ".join(artists) if artists else ""
-            if tag.album:
-                metadata["album"] = tag.album
-    except Exception:
-        pass
-
-    return audio_data, audio_format, metadata
-
-
-def _decrypt_qmcv2(file_data: bytes, filename: str) -> tuple[bytes, str, dict]:
-    if not QMCV2_CORE_KEY:
-        raise ValueError("QMCV2_CORE_KEY 环境变量未设置，无法解密 QMCv2 文件")
-
-    fd = io.BytesIO(file_data)
-    fd.name = filename
-    qmcfile = lt.QMCv2.open(fd, core_key=QMCV2_CORE_KEY)
-    audio_data = b"".join(qmcfile)
-
-    ext = get_file_ext(filename)
-    if "flac" in ext:
-        audio_format = "flac"
-    elif "ogg" in ext:
-        audio_format = "ogg"
-    elif "m4a" in ext or "mp4" in ext:
-        audio_format = "m4a"
-    else:
-        audio_format = "mp3"
-
-    return audio_data, audio_format, {}
-
-
-def _decrypt_qmcv1(file_data: bytes, filename: str) -> tuple[bytes, str, dict]:
-    if not QMCV1_MASK:
-        raise ValueError("QMCV1_MASK 环境变量未设置，无法解密 QMCv1 文件")
-
-    fd = io.BytesIO(file_data)
-    fd.name = filename
-    qmcfile = lt.QMCv1.open(fd, mask=QMCV1_MASK)
-    audio_data = b"".join(qmcfile)
-
-    ext = get_file_ext(filename)
-    if "flac" in ext:
-        audio_format = "flac"
-    elif "ogg" in ext:
-        audio_format = "ogg"
-    else:
-        audio_format = "mp3"
-
-    return audio_data, audio_format, {}
-
-
-def _decrypt_kgm(file_data: bytes, filename: str) -> tuple[bytes, str, dict]:
-    if not (KGM_TABLE1 and KGM_TABLE2 and KGM_TABLEV2):
-        raise ValueError("KGM_TABLE1/TABLE2/TABLEV2 环境变量未设置，无法解密 KGM 文件")
-
-    fd = io.BytesIO(file_data)
-    fd.name = filename
-    ext = get_file_ext(filename)
-
-    kwargs = {
-        "table1": KGM_TABLE1,
-        "table2": KGM_TABLE2,
-        "tablev2": KGM_TABLEV2,
-    }
-    if ext == "vpr":
-        if not VPR_KEY:
-            raise ValueError("VPR_KEY 环境变量未设置，无法解密 VPR 文件")
-        kwargs["vpr_key"] = VPR_KEY
-
-    kgmfile = lt.KGMorVPR.open(fd, **kwargs)
-    audio_data = b"".join(kgmfile)
-
-    return audio_data, "mp3", {}
-
-
-def _decrypt_kwm(file_data: bytes, filename: str) -> tuple[bytes, str, dict]:
-    if not KWM_CORE_KEY:
-        raise ValueError("KWM_CORE_KEY 环境变量未设置，无法解密 KWM 文件")
-
-    fd = io.BytesIO(file_data)
-    fd.name = filename
-    kwmfile = lt.KWM.open(fd, core_key=KWM_CORE_KEY)
-    audio_data = b"".join(kwmfile)
-
-    return audio_data, "mp3", {}
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +58,14 @@ async def decrypt_file(file: UploadFile = File(...)):
     成功: 返回音频 blob（Content-Type 由格式决定），元数据在响应头中
     失败: 返回 JSON {"ok": false, "reason": "..."}
     """
+    # 限制文件大小为 50MB，防止内存耗尽
+    MAX_FILE_SIZE = 50 * 1024 * 1024
+    if file.size and file.size > MAX_FILE_SIZE:
+        return JSONResponse(
+            status_code=413,
+            content={"ok": False, "reason": "文件大小超过 50MB 限制"},
+        )
+
     try:
         file_data = await file.read()
         if not file_data:
@@ -281,9 +74,16 @@ async def decrypt_file(file: UploadFile = File(...)):
                 content={"ok": False, "reason": "上传文件为空"},
             )
 
+        # 二次检查实际读取大小（file.size 可能未提供）
+        if len(file_data) > MAX_FILE_SIZE:
+            return JSONResponse(
+                status_code=413,
+                content={"ok": False, "reason": "文件大小超过 50MB 限制"},
+            )
+
         filename = file.filename or "unknown"
 
-        # 解密
+        # 解密（路由逻辑在 decrypt_algorithms.py 中实现）
         try:
             audio_data, audio_format, metadata = route_and_decrypt(filename, file_data)
         except ValueError as e:
@@ -318,6 +118,35 @@ async def decrypt_file(file: UploadFile = File(...)):
             status_code=500,
             content={"ok": False, "reason": f"服务器内部错误: {str(e)[:200]}"},
         )
+
+
+@app.get("/api/formats")
+async def list_formats():
+    """
+    返回格式注册表，供前端查询支持的解密格式。
+    建立新后端解密器与旧前端解密器的关联映射。
+    """
+    supported = []
+    for name, entry in FORMAT_REGISTRY.items():
+        supported.append({
+            "decryptor": name,
+            "platform": entry["platform"],
+            "extensions": list(entry["extensions"]),
+            "libtakiyasha": entry["libtakiyasha"],
+            "legacy_frontend": entry["legacy_frontend"],
+            "env_keys": entry["env_keys"],
+        })
+
+    unsupported = []
+    for ext, info in UNSUPPORTED_LEGACY_FORMATS.items():
+        unsupported.append({
+            "extension": ext,
+            "platform": info["platform"],
+            "legacy_frontend": info["legacy_frontend"],
+            "reason": info["reason"],
+        })
+
+    return {"supported": supported, "unsupported_legacy": unsupported}
 
 
 # ---------------------------------------------------------------------------
