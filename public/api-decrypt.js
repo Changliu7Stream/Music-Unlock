@@ -6,6 +6,36 @@
  *
  * 等价于注释掉 src/decrypt 内所有旧解密器注册——旧 Worker 解密链路被完全旁路。
  * 前端 UI 组件、下载逻辑、PWA 配置均不动。
+ *
+ * ─── 新旧解密器关联映射 ───────────────────────────────────────────
+ *
+ * 旧前端 (um-web legacy src/decrypt/)     →  新后端 (main.py / libtakiyasha)
+ * ────────────────────────────────────────    ──────────────────────────────
+ * src/decrypt/ncm.ts    → NCMDecrypt        →  FORMAT_REGISTRY["NCM"]
+ *   扩展名: .ncm                               lt.NCM.open(core_key=...)
+ *
+ * src/decrypt/qmc/v2.ts → QMCv2Decrypt      →  FORMAT_REGISTRY["QMCv2"]
+ *   扩展名: .mflac .mflac0 .mflach             lt.QMCv2.open(core_key=...)
+ *           .mgg .mgg0 .mgg1 .mggl .mmp4
+ *
+ * src/decrypt/qmc/v1.ts → QMCv1Decrypt      →  FORMAT_REGISTRY["QMCv1"]
+ *   扩展名: .qmc0 .qmc2 .qmc3 .qmc4            lt.QMCv1.open(mask=...)
+ *           .qmc6 .qmc8 .qmcflac .qmcogg
+ *           .tkm .bkcmp3 .bkcm4a .bkcflac
+ *           .bkcwav .bkcape .bkcogg .bkcwma
+ *
+ * src/decrypt/kgm.ts    → KGMCrypto         →  FORMAT_REGISTRY["KGMorVPR"]
+ *   扩展名: .kgm .kgma .vpr                    lt.KGMorVPR.open(table1=..., ...)
+ *
+ * src/decrypt/kwm.ts    → KWMDecrypt         →  FORMAT_REGISTRY["KWM"]
+ *   扩展名: .kwm                               lt.KWM.open(core_key=...)
+ *
+ * ─── 旧前端支持但新后端暂不支持 ──────────────────────────────────
+ * src/decrypt/xiami.ts    → XmDecrypt        .tm2   (虾米音乐，libtakiyasha 未实现)
+ * src/decrypt/ximalaya.ts → XimalayaDecrypt  .xm .x2m .x3m (喜马拉雅，同上)
+ *
+ * 后端 /api/formats 端点可动态返回完整映射表。
+ * ────────────────────────────────────────────────────────────────
  */
 (function () {
     'use strict';
@@ -26,6 +56,21 @@
         if (target) {
             patchFileSelector(target);
             console.log('[api-decrypt] FileSelector 已接管，解密请求将发送至 ' + API_URL);
+            // 查询后端格式注册表，输出新旧解密器映射
+            fetch('/api/formats').then(function (r) { return r.json(); }).then(function (data) {
+                console.group('[api-decrypt] 格式注册表 (新后端 ↔ 旧前端)');
+                data.supported.forEach(function (f) {
+                    console.log('  ' + f.decryptor + ' [' + f.platform + '] .' + f.extensions.join(' .') + '\n' +
+                        '    旧前端: ' + f.legacy_frontend + ' | libtakiyasha: ' + f.libtakiyasha);
+                });
+                if (data.unsupported_legacy && data.unsupported_legacy.length) {
+                    console.warn('  旧前端支持但新后端暂不支持:');
+                    data.unsupported_legacy.forEach(function (f) {
+                        console.warn('    .' + f.extension + ' [' + f.platform + '] — ' + f.reason);
+                    });
+                }
+                console.groupEnd();
+            }).catch(function () {});
         } else {
             // 可能组件还未渲染，稍后重试
             setTimeout(init, 200);
