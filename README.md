@@ -5,8 +5,6 @@
 ## 在线演示
 
 - GitHub Pages：[https://changliu7stream.github.io/Music-Unlock/](https://changliu7stream.github.io/Music-Unlock/)
-- 主站：[https://musicunlock.guxinze.us.ci/](https://musicunlock.guxinze.us.ci/)
-- 备用：[https://quiet-pie-063f08.netlify.app/](https://quiet-pie-063f08.netlify.app/)
 
 ## 简介
 
