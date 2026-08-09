@@ -1,6 +1,6 @@
 # Music-Unlock
 
-音乐解锁 Web 应用（um-web legacy build v1.10.6），解密逻辑已迁移至 FastAPI 后端。
+音乐解锁 Web 应用（um-web legacy build v1.10.7），解密逻辑已迁移至 FastAPI 后端。
 
 ## 在线演示
 
@@ -10,7 +10,7 @@
 
 ## 简介
 
-本项目基于 um-web legacy v1.10.6 Vue2 项目，保留前端 UI 与 PWA 配置不动，做最小升级：
+本项目基于 um-web legacy v1.10.6 Vue2 项目，升级至 v1.10.7，保留前端 UI 与 PWA 配置不动，做最小升级：
 
 - 前端 `public/api-decrypt.js` 拦截 FileSelector，将文件上传至后端 `/api/decrypt`
 - 后端 `main.py` 使用 Python FastAPI + libtakiyasha 2.x，按后缀路由解密
