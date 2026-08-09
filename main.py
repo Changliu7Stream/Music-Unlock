@@ -273,7 +273,7 @@ def _decrypt_kwm(file_data: bytes, filename: str) -> tuple[bytes, str, dict]:
 # ---------------------------------------------------------------------------
 # 格式注册表：新后端解密器 ↔ 旧前端解密器 对照
 #
-# 旧前端（um-web legacy v1.10.6）在 src/decrypt/ 下注册解密器，
+# 旧前端（um-web legacy v1.10.7）在 src/decrypt/ 下注册解密器，
 # 新后端使用 libtakiyasha 2.x 实现相同算法。
 # 本表建立了每个格式的新旧解密器关联：
 #   - extensions:       支持的文件扩展名（与旧前端一致）
