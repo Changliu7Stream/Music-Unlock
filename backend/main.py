@@ -1,15 +1,12 @@
 """
-MusicUnlock 后端解密服务（独立仓库）
+MusicUnlock 后端解密服务
 FastAPI + libtakiyasha 2.x
 
 POST /api/decrypt: 接收上传的加密音频文件，按后缀路由解密，返回原始格式 blob。
-GET  /api/formats: 返回格式注册表（新后端 <-> 旧前端解密器映射）。
+GET /api/formats: 返回格式注册表（新后端 <-> 旧前端解密器映射）。
 
 解密算法已提取至 decrypt_algorithms.py，本文件仅负责 HTTP 服务层。
-
-关联前端项目: https://github.com/Changliu7Stream/Music-Unlock
-前端通过 public/api-decrypt.js 拦截 FileSelector，将文件上传至本服务 /api/decrypt，
-拿到解密后的原始格式 blob（FLAC/OGG/MP3/M4A/WAV/APE）后走原下载逻辑。
+前端静态文件在仓库根目录（上级目录），后端代码在 backend/ 文件夹。
 """
 import urllib.parse
 import warnings
@@ -171,11 +168,11 @@ async def health():
 
 
 # ---------------------------------------------------------------------------
-# 静态文件服务（可选）：若 public/ 目录存在则托管前端静态文件
+# 静态文件服务（可选）：若上级目录存在 index.html 则托管前端静态文件
 # ---------------------------------------------------------------------------
-public_dir = Path(__file__).parent / "public"
-if public_dir.exists():
-    app.mount("/", StaticFiles(directory=str(public_dir), html=True), name="static")
+frontend_dir = Path(__file__).parent.parent
+if (frontend_dir / "index.html").exists():
+    app.mount("/", StaticFiles(directory=str(frontend_dir), html=True), name="static")
 
 
 if __name__ == "__main__":

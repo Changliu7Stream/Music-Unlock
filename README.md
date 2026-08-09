@@ -15,19 +15,21 @@
 
 ```
 Music-Unlock/
-├── public/                    # 前端静态文件（Netlify/Vercel 部署目录）
-│   ├── css/                   # 样式文件
-│   ├── js/                    # JavaScript 文件
-│   ├── fonts/                 # 字体文件
-│   ├── img/                   # 图片资源
-│   ├── index.html             # 入口页面
-│   ├── loader.js              # 加载器
-│   ├── service-worker.js      # PWA Service Worker
-│   └── web-manifest.json      # PWA Manifest
-├── main.py                    # FastAPI 服务层（HTTP 端点 + 静态文件托管）
-├── decrypt_algorithms.py      # 解密算法模块（NCM/QMCv1/QMCv2/KGMorVPR/KWM）
-├── requirements.txt           # Python 依赖
-├── .env.example               # 环境变量模板（密钥配置）
+├── index.html                # 前端入口页面（仓库根目录，Netlify 直接识别）
+├── css/                      # 样式文件
+├── js/                       # JavaScript 文件
+├── fonts/                    # 字体文件
+├── img/                      # 图片资源
+├── favicon.ico
+├── loader.js
+├── service-worker.js         # PWA Service Worker
+├── web-manifest.json         # PWA Manifest
+├── precache-manifest.*.js
+├── backend/                  # 后端解密服务（单独文件夹）
+│   ├── main.py               # FastAPI 服务层
+│   ├── decrypt_algorithms.py # 解密算法模块
+│   ├── requirements.txt      # Python 依赖
+│   └── .env.example          # 环境变量模板（密钥配置）
 ├── .gitignore
 ├── LICENSE
 └── README.md
@@ -35,7 +37,7 @@ Music-Unlock/
 
 ## 新旧解密器关联
 
-`decrypt_algorithms.py` 中的 `FORMAT_REGISTRY` 建立了新后端解密器与旧前端 `src/decrypt/` 的完整映射：
+`backend/decrypt_algorithms.py` 中的 `FORMAT_REGISTRY` 建立了新后端解密器与旧前端 `src/decrypt/` 的完整映射：
 
 | 新后端解密器 | 旧前端模块 | libtakiyasha | 平台 |
 |-------------|-----------|--------------|------|
@@ -68,21 +70,25 @@ Music-Unlock/
 
 ### 前端（静态站）
 
+前端静态文件在仓库根目录，Netlify/Vercel 直接识别，无需额外配置 Publish directory。
+
 #### Netlify
 
 1. 连接 GitHub 仓库 `Changliu7Stream/Music-Unlock`
-2. Build command 留空，Publish directory 设置为 `public`
+2. Build command 留空，Publish directory 留空（或设为 `.`）
 3. 点击 "Deploy site"
 
 #### Vercel
 
 1. 导入 GitHub 仓库 `Changliu7Stream/Music-Unlock`
-2. Framework Preset 选择 "Other"，Root Directory 设置为 `public`
+2. Framework Preset 选择 "Other"
 3. 点击 "Deploy"
 
 ### 后端（FastAPI）
 
 ```bash
+cd backend
+
 # 安装依赖
 pip install -r requirements.txt
 
@@ -96,7 +102,7 @@ python main.py
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-后端启动后，若 `public/` 目录存在则自动托管前端静态文件。
+后端启动后，会自动托管上级目录的前端静态文件。
 
 ## 技术栈
 
