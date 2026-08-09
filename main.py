@@ -128,22 +128,31 @@ def route_and_decrypt(filename: str, file_data: bytes) -> tuple[bytes, str, dict
     """
     根据文件后缀路由到对应的解密器。
     返回 (解密后音频数据, 音频格式, 元数据)。
+
+    路由逻辑通过 FORMAT_REGISTRY 查表实现，该表建立了新后端解密器
+    （libtakiyasha 2.x）与旧前端解密器（um-web legacy src/decrypt）的关联。
     """
     ext = get_file_ext(filename)
 
-    if ext == "ncm":
-        return _decrypt_ncm(file_data, filename)
-    elif ext in ("mflac", "mflac0", "mflach", "mgg", "mgg0", "mgg1", "mggl", "mmp4"):
-        return _decrypt_qmcv2(file_data, filename)
-    elif ext.startswith("qmc") or ext in ("tkm", "bkcmp3", "bkcm4a", "bkcflac",
-                                           "bkcwav", "bkcape", "bkcogg", "bkcwma"):
-        return _decrypt_qmcv1(file_data, filename)
-    elif ext in ("kgm", "kgma", "vpr"):
-        return _decrypt_kgm(file_data, filename)
-    elif ext == "kwm":
-        return _decrypt_kwm(file_data, filename)
-    else:
-        raise ValueError(f"不支持的文件格式: .{ext}")
+    # 1. 精确匹配已知扩展名
+    if ext in _EXT_TO_DECRYPTOR:
+        entry = FORMAT_REGISTRY[_EXT_TO_DECRYPTOR[ext]]
+        return entry["decryptor"](file_data, filename)
+
+    # 2. 前缀匹配（qmc* 系列旧版扩展名）
+    if ext.startswith("qmc"):
+        entry = FORMAT_REGISTRY["QMCv1"]
+        return entry["decryptor"](file_data, filename)
+
+    # 3. 旧前端支持但新后端暂不支持的格式
+    if ext in UNSUPPORTED_LEGACY_FORMATS:
+        info = UNSUPPORTED_LEGACY_FORMATS[ext]
+        raise ValueError(
+            f"格式 .{ext}（{info['platform']}）暂不支持：{info['reason']}"
+        )
+
+    # 4. 完全未知
+    raise ValueError(f"不支持的文件格式: .{ext}")
 
 
 def _decrypt_ncm(file_data: bytes, filename: str) -> tuple[bytes, str, dict]:
@@ -262,6 +271,98 @@ def _decrypt_kwm(file_data: bytes, filename: str) -> tuple[bytes, str, dict]:
 
 
 # ---------------------------------------------------------------------------
+# 格式注册表：新后端解密器 ↔ 旧前端解密器 对照
+#
+# 旧前端（um-web legacy v1.10.6）在 src/decrypt/ 下注册解密器，
+# 新后端使用 libtakiyasha 2.x 实现相同算法。
+# 本表建立了每个格式的新旧解密器关联：
+#   - extensions:       支持的文件扩展名（与旧前端一致）
+#   - decryptor:        新后端处理函数（调用 libtakiyasha）
+#   - libtakiyasha:     libtakiyasha 对应的类/方法
+#   - legacy_frontend:  旧前端对应的解密器模块与类名
+#   - platform:         音乐平台
+#   - env_keys:         所需的环境变量
+# ---------------------------------------------------------------------------
+
+FORMAT_REGISTRY = {
+    "NCM": {
+        "extensions": ("ncm",),
+        "decryptor": _decrypt_ncm,
+        "libtakiyasha": "lt.NCM.open(fd, core_key=..., tag_key=...)",
+        "legacy_frontend": "src/decrypt/ncm.ts → NCMDecrypt",
+        "platform": "网易云音乐",
+        "env_keys": ["NCM_CORE_KEY", "NCM_TAG_KEY"],
+    },
+    "QMCv2": {
+        "extensions": ("mflac", "mflac0", "mflach", "mgg", "mgg0", "mgg1", "mggl", "mmp4"),
+        "decryptor": _decrypt_qmcv2,
+        "libtakiyasha": "lt.QMCv2.open(fd, core_key=...)",
+        "legacy_frontend": "src/decrypt/qmc/v2.ts → QMCv2Decrypt",
+        "platform": "QQ音乐新版",
+        "env_keys": ["QMCV2_CORE_KEY", "QMCV2_CORE_KEY_SALT"],
+    },
+    "QMCv1": {
+        "extensions": (
+            "qmc0", "qmc2", "qmc3", "qmc4", "qmc6", "qmc8",
+            "qmcflac", "qmcogg", "tkm",
+            "bkcmp3", "bkcm4a", "bkcflac", "bkcwav", "bkcape", "bkcogg", "bkcwma",
+        ),
+        "decryptor": _decrypt_qmcv1,
+        "libtakiyasha": "lt.QMCv1.open(fd, mask=...)",
+        "legacy_frontend": "src/decrypt/qmc/v1.ts → QMCv1Decrypt",
+        "platform": "QQ音乐旧版",
+        "env_keys": ["QMCV1_MASK"],
+    },
+    "KGMorVPR": {
+        "extensions": ("kgm", "kgma", "vpr"),
+        "decryptor": _decrypt_kgm,
+        "libtakiyasha": "lt.KGMorVPR.open(fd, table1=..., table2=..., tablev2=..., vpr_key=...)",
+        "legacy_frontend": "src/decrypt/kgm.ts → KGMCrypto",
+        "platform": "酷狗音乐",
+        "env_keys": ["KGM_TABLE1", "KGM_TABLE2", "KGM_TABLEV2", "VPR_KEY"],
+    },
+    "KWM": {
+        "extensions": ("kwm",),
+        "decryptor": _decrypt_kwm,
+        "libtakiyasha": "lt.KWM.open(fd, core_key=...)",
+        "legacy_frontend": "src/decrypt/kwm.ts → KWMDecrypt",
+        "platform": "酷我音乐",
+        "env_keys": ["KWM_CORE_KEY"],
+    },
+}
+
+# 旧前端支持但新后端暂不支持的格式（libtakiyasha 未实现对应算法）
+UNSUPPORTED_LEGACY_FORMATS = {
+    "tm2": {
+        "legacy_frontend": "src/decrypt/xiami.ts → XmDecrypt",
+        "platform": "虾米音乐",
+        "reason": "libtakiyasha 未实现虾米解密算法",
+    },
+    "xm": {
+        "legacy_frontend": "src/decrypt/ximalaya.ts → XimalayaDecrypt",
+        "platform": "喜马拉雅",
+        "reason": "libtakiyasha 未实现喜马拉雅解密算法",
+    },
+    "x2m": {
+        "legacy_frontend": "src/decrypt/ximalaya.ts → XimalayaDecrypt",
+        "platform": "喜马拉雅",
+        "reason": "libtakiyasha 未实现喜马拉雅解密算法",
+    },
+    "x3m": {
+        "legacy_frontend": "src/decrypt/ximalaya.ts → XimalayaDecrypt",
+        "platform": "喜马拉雅",
+        "reason": "libtakiyasha 未实现喜马拉雅解密算法",
+    },
+}
+
+# 构建扩展名 → 解密器名称 的反向查找表
+_EXT_TO_DECRYPTOR: dict[str, str] = {}
+for _name, _entry in FORMAT_REGISTRY.items():
+    for _ext in _entry["extensions"]:
+        _EXT_TO_DECRYPTOR[_ext] = _name
+
+
+# ---------------------------------------------------------------------------
 # API 端点
 # ---------------------------------------------------------------------------
 
@@ -318,6 +419,35 @@ async def decrypt_file(file: UploadFile = File(...)):
             status_code=500,
             content={"ok": False, "reason": f"服务器内部错误: {str(e)[:200]}"},
         )
+
+
+@app.get("/api/formats")
+async def list_formats():
+    """
+    返回格式注册表，供前端查询支持的解密格式。
+    建立新后端解密器与旧前端解密器的关联映射。
+    """
+    supported = []
+    for name, entry in FORMAT_REGISTRY.items():
+        supported.append({
+            "decryptor": name,
+            "platform": entry["platform"],
+            "extensions": list(entry["extensions"]),
+            "libtakiyasha": entry["libtakiyasha"],
+            "legacy_frontend": entry["legacy_frontend"],
+            "env_keys": entry["env_keys"],
+        })
+
+    unsupported = []
+    for ext, info in UNSUPPORTED_LEGACY_FORMATS.items():
+        unsupported.append({
+            "extension": ext,
+            "platform": info["platform"],
+            "legacy_frontend": info["legacy_frontend"],
+            "reason": info["reason"],
+        })
+
+    return {"supported": supported, "unsupported_legacy": unsupported}
 
 
 # ---------------------------------------------------------------------------
